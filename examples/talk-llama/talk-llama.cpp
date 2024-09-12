@@ -67,8 +67,8 @@ struct whisper_params {
     bool use_gpu        = true;
     bool flash_attn     = false;
 
-    std::string person      = "Georgi";
-    std::string bot_name    = "LLaMA";
+    std::string person      = "Stompy";
+    std::string bot_name    = "Droid";
     std::string wake_cmd    = "";
     std::string heard_ok    = "";
     std::string language    = "en";
@@ -79,6 +79,9 @@ struct whisper_params {
     std::string prompt      = "";
     std::string fname_out;
     std::string path_session = "";       // path to file for saving/loading model eval state
+    std::string welcome_message = "Hello! I'm your personal droid. How can I help you today?";
+    std::string initializing_message = "Hello from the Kay Scale Labs! We are booting up the system and your robot. Please wait a moment before all parts of the system will be ready.";
+    int32_t llm_max_tokens = 80;
 };
 
 void whisper_print_usage(int argc, char ** argv, const whisper_params & params);
@@ -439,7 +442,8 @@ int main(int argc, char ** argv) {
     }
 
     // evaluate the initial prompt
-
+    const int voice_id = 2;
+    speak_with_file(params.speak, params.initializing_message.c_str(), params.speak_file, voice_id);
     printf("\n");
     printf("%s : initializing - please wait ...\n", __func__);
 
@@ -487,6 +491,8 @@ int main(int argc, char ** argv) {
         }
     }
 
+    speak_with_file(params.speak, params.welcome_message.c_str(), params.speak_file, voice_id);
+
     // HACK - because session saving incurs a non-negligible delay, for now skip re-saving session
     // if we loaded a session with at least 75% similarity. It's currently just used to speed up the
     // initial prompt so it doesn't need to be an exact match.
@@ -511,7 +517,6 @@ int main(int argc, char ** argv) {
     audio.clear();
 
     // text inference variables
-    const int voice_id = 2;
     const int n_keep   = embd_inp.size();
     const int n_ctx    = llama_n_ctx(ctx_llama);
 
@@ -643,6 +648,7 @@ int main(int argc, char ** argv) {
                 // text inference
                 bool done = false;
                 std::string text_to_speak;
+
                 while (true) {
                     // predict
                     if (embd.size() > 0) {
@@ -717,6 +723,9 @@ int main(int argc, char ** argv) {
 
                     if (done) break;
 
+                    // Add a counter for generated tokens
+                    const int max_tokens = 80; // Adjust this value as needed
+
                     {
                         // out of user input, sample next token
                         const float top_k          = 5;
@@ -776,6 +785,23 @@ int main(int argc, char ** argv) {
 
                             printf("%s", llama_token_to_piece(ctx_llama, id).c_str());
                             fflush(stdout);
+
+                            // Check if we've reached the maximum number of tokens
+                            if (text_to_speak.length() >= params.llm_max_tokens) {
+                                done = true;
+                                printf("\n[Max tokens reached]\n");
+                                fflush(stdout);
+
+                                // Cut off text after the last comma, question mark, or dot
+                                size_t last_comma = text_to_speak.find_last_of(',');
+                                size_t last_question = text_to_speak.find_last_of('?');
+                                size_t last_dot = text_to_speak.find_last_of('.');
+                                size_t cut_off = std::max({last_comma, last_question, last_dot});
+
+                                if (cut_off != std::string::npos) {
+                                    text_to_speak = text_to_speak.substr(0, cut_off + 1);
+                                }
+                            }
                         }
                     }
 
@@ -810,6 +836,7 @@ int main(int argc, char ** argv) {
 
                 // Reset the timeout timer
                 last_interaction_time = std::chrono::high_resolution_clock::now();
+                fprintf(stdout, "\n%s: Speech uttered! Continue conversation ...\n", __func__);
             }
 
             // Check if the timeout has been exceeded
